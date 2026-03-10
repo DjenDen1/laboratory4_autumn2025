@@ -1,0 +1,90 @@
+name: CICD
+
+on: 
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Clean build directory
+        run: |
+          if (Test-Path build) {
+            Remove-Item -Recurse -Force build
+          }
+
+      - name: Configure CMake
+        run: cmake -S . -B build
+
+      - name: Build with CMake
+        run: cmake --build build --config Release
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: build/Release/laboratory3.exe 
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps: 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clean build directory
+        run: rm -rf build
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+      
+      - name: Configure CMake
+        run: cmake -S . -B build
+      
+      - name: Build project
+        run: cmake --build build --config Release
+      
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: build/laboratory4
+
+  create-release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: windows-artifact
+
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: linux-artifact
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: |
+            windows-artifact/laboratory4.exe
+            linux-artifact/laboratory4
+          body: |
+            Laboratory 3 Release v${{ github.run_number }}

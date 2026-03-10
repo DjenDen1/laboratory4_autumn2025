@@ -1,0 +1,3 @@
+C:/CPP2025/lab4final/build/CMakeFiles/lab4.dir
+C:/CPP2025/lab4final/build/CMakeFiles/edit_cache.dir
+C:/CPP2025/lab4final/build/CMakeFiles/rebuild_cache.dir

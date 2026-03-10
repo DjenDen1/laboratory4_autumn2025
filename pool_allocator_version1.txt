@@ -1,0 +1,136 @@
+#include <cstddef>
+#include <new>      // для std::bad_alloc
+#include <iostream> // для отладки (можно убрать)
+#include <memory>
+template<typename T, std::size_t ChunkSize = 64>
+class PoolMapAllocator {
+public:
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using pointer = T*;
+    using const_pointer = const T*;
+    using reference = T&;
+    using const_reference = const T&;
+    using value_type = T;
+
+    PoolMapAllocator() : free_list(nullptr), total_allocated(0) {}
+
+    template<typename U>
+    PoolMapAllocator(const PoolMapAllocator<U, ChunkSize>&) noexcept : free_list(nullptr), total_allocated(0) {}
+
+    ~PoolMapAllocator() {
+      free_blocks();
+    }
+
+    template<typename U>
+    struct rebind {
+        using other = PoolMapAllocator<U, ChunkSize>;
+    };
+
+    pointer allocate(size_type numObjects) {
+    
+        if (numObjects != 1) {
+            return static_cast<pointer>(::operator new(numObjects * sizeof(T)));
+        }
+
+
+        if (free_list == nullptr) {
+            allocate_new_block();
+        }
+
+        
+        void* result = free_list;
+        
+        free_list = *static_cast<void**>(free_list); 
+        total_allocated++;
+        return static_cast<pointer>(result);
+    }
+
+    void deallocate(pointer p, size_type numObjects) noexcept {
+        if (p == nullptr) return;
+        if (numObjects != 1) {
+            ::operator delete(p);
+            return;
+        }
+
+        *reinterpret_cast<void**>(p) = free_list;
+        free_list = p;
+        total_allocated--;
+    }
+
+    // Для совместимости с C++11 и выше
+    using propagate_on_container_copy_assignment = std::false_type;
+    using propagate_on_container_move_assignment = std::false_type;
+    using propagate_on_container_swap = std::false_type;
+
+    bool operator==(const PoolMapAllocator& other) const noexcept {
+        return this == &other; // разные объекты считаются неравными
+    }
+    bool operator!=(const PoolMapAllocator& other) const noexcept {
+        return !(*this == other);
+    }
+
+    // Дополнительный метод для получения статистики (необязательно)
+    size_type getTotalAllocated() const { return total_allocated; }
+
+private:
+    // Внутренняя структура для хранения блоков (чтобы знать, что освобождать)
+    struct Block {
+        void* ptr;
+        Block* next;
+    };
+
+    void allocate_new_block() {
+        // Выделяем память под ChunkSize объектов T
+        void* new_block = ::operator new(ChunkSize * sizeof(T));
+
+        push_front(new_block); // было blocks.push_front(new_block) так в самой функции уже указан blocks, к которому мы добавляем
+
+        char* start = static_cast<char*>(new_block);
+        // Инициализируем список свобод
+        for (std::size_t i = 0; i < ChunkSize; ++i) {
+            void* cell = start + i * sizeof(T);
+    
+            *static_cast<void**>(cell) = free_list;
+            free_list = cell;
+        }
+    }
+
+private:
+    void* free_list;           
+    std::size_t total_allocated;    
+   
+    struct BlockList {
+        void* ptr;
+        BlockList* next;
+        BlockList(void* p, BlockList* n) : ptr(p), next(n) {}
+    };
+    BlockList* blocks = nullptr;
+
+    void push_front(void* block) {
+        blocks = new BlockList(block, blocks);
+    }
+
+    void free_blocks() {
+        while (blocks) {
+            void* to_free = blocks->ptr;
+            BlockList* next = blocks->next;
+            ::operator delete(to_free);
+            delete blocks;
+            blocks = next;
+        }
+    }
+};
+
+template<std::size_t ChunkSize>
+class PoolMapAllocator<void, ChunkSize> {
+public:
+    using pointer = void*;
+    using const_pointer = const void*;
+    using value_type = void;
+
+    template<typename U>
+    struct rebind {
+        using other = PoolMapAllocator<U, ChunkSize>;
+    };
+};

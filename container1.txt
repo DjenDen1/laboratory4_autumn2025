@@ -1,0 +1,219 @@
+#ifndef CONSISTENT_CONTAINER_H
+#define CONSISTENT_CONTAINER_H
+
+#include <iostream>
+#include <stdexcept>
+#include <memory>       // для std::allocator, std::allocator_traits
+#include <algorithm>    // для std::copy_backward
+
+template<typename T, typename Allocator = std::allocator<T>>
+class ConsistentContainer
+{
+private:
+    // Удобный псевдоним для работы с аллокатором через traits
+    using AllocTraits = std::allocator_traits<Allocator>;
+
+public:
+    // Типы, необходимые для совместимости со STL
+    using value_type        = T;
+    using allocator_type    = Allocator;
+    using size_type         = std::size_t;
+    using difference_type   = std::ptrdiff_t;
+    using reference         = value_type&;
+    using const_reference   = const value_type&;
+    using pointer           = typename AllocTraits::pointer;
+    using const_pointer     = typename AllocTraits::const_pointer;
+    using iterator          = pointer;          // простой указатель как итератор
+    using const_iterator    = const_pointer;
+
+private:
+    pointer     data_;               // указатель на начало буфера
+    size_type   size_;                // текущее количество элементов
+    size_type   capacity_;            // размер выделенной памяти (в элементах)
+    double      growth_;              // коэффициент роста
+    Allocator   alloc_;               // экземпляр аллокатора
+
+    // Вспомогательная функция для расширения буфера
+    void grow_container()
+    {
+        // Вычисляем новую ёмкость (минимум 1, иначе умножение на growth)
+        size_type new_capacity = static_cast<size_type>(capacity_ * growth_);
+        if (new_capacity <= capacity_)
+            new_capacity = capacity_ + 1;
+
+        // Выделяем новую память через аллокатор
+        pointer new_data = AllocTraits::allocate(alloc_, new_capacity);
+
+        // Переносим существующие элементы в новую память (конструируем копии)
+        for (size_type i = 0; i < size_; ++i)
+        {
+            AllocTraits::construct(alloc_, new_data + i, data_[i]);
+        }
+
+        // Уничтожаем старые элементы и освобождаем старую память
+        for (size_type i = 0; i < size_; ++i)
+        {
+            AllocTraits::destroy(alloc_, data_ + i);
+        }
+        AllocTraits::deallocate(alloc_, data_, capacity_);
+
+        data_ = new_data;
+        capacity_ = new_capacity;
+    }
+
+    // Вспомогательная функция для уменьшения ёмкости (shrink_to_fit)
+    void shrink_to_fit()
+    {
+        if (size_ == capacity_ || size_ == 0)
+            return;
+
+        size_type new_capacity = size_;   // точная подгонка под размер
+        if (new_capacity < 5) new_capacity = 5;
+
+        pointer new_data = AllocTraits::allocate(alloc_, new_capacity);
+
+        // Переносим элементы
+        for (size_type i = 0; i < size_; ++i)
+        {
+            AllocTraits::construct(alloc_, new_data + i, data_[i]);
+        }
+
+        // Уничтожаем старые элементы и освобождаем старую память
+        for (size_type i = 0; i < size_; ++i)
+        {
+            AllocTraits::destroy(alloc_, data_ + i);
+        }
+        AllocTraits::deallocate(alloc_, data_, capacity_);
+
+        data_ = new_data;
+        capacity_ = new_capacity;
+    }
+
+public:
+    // Конструктор с возможностью задать начальную ёмкость и коэффициент роста
+    explicit ConsistentContainer(size_type base_capacity = 5,
+                                 double growth_factor = 1.6,
+                                 const Allocator& alloc = Allocator())
+        : data_(nullptr), size_(0), capacity_(base_capacity), growth_(growth_factor), alloc_(alloc)
+    {
+        if (base_capacity > 0)
+        {
+            data_ = AllocTraits::allocate(alloc_, base_capacity);
+        }
+    }
+
+    // Деструктор
+    ~ConsistentContainer()
+    {
+        // Уничтожаем все существующие элементы
+        for (size_type i = 0; i < size_; ++i)
+        {
+            AllocTraits::destroy(alloc_, data_ + i);
+        }
+        // Освобождаем память
+        if (data_)
+            AllocTraits::deallocate(alloc_, data_, capacity_);
+    }
+
+    // Запрещаем копирование для простоты (можно реализовать позже)
+    ConsistentContainer(const ConsistentContainer&) = delete;
+    ConsistentContainer& operator=(const ConsistentContainer&) = delete;
+
+    // Добавление элемента в конец
+    void push_back(const T& value)
+    {
+        if (size_ >= capacity_)
+            grow_container();
+
+        AllocTraits::construct(alloc_, data_ + size_, value);
+        ++size_;
+    }
+
+    // Добавление элемента в начало
+    void push_front(const T& value)
+    {
+        insert(0, value);
+    }
+
+    // Вставка элемента по индексу
+    void insert(size_type index, const T& value)
+    {
+        if (index > size_)
+            throw std::out_of_range("Index out of range");
+
+        if (size_ >= capacity_)
+            grow_container();
+
+        // Сдвигаем элементы вправо, начиная с конца
+        for (size_type i = size_; i > index; --i)
+        {
+            // Перемещаем существующий элемент на новое место
+            AllocTraits::construct(alloc_, data_ + i, std::move(data_[i-1]));
+            AllocTraits::destroy(alloc_, data_ + i - 1);
+        }
+
+        // Конструируем новый элемент на vacated месте
+        AllocTraits::construct(alloc_, data_ + index, value);
+        ++size_;
+    }
+
+    // Удаление последнего элемента (для полноты)
+    void pop_back()
+    {
+        if (size_ == 0)
+            throw std::out_of_range("pop_back on empty container");
+        --size_;
+        AllocTraits::destroy(alloc_, data_ + size_);
+    }
+
+    // Удаление первого элемента
+    void pop_front()
+    {
+        if (size_ == 0)
+            throw std::out_of_range("pop_front on empty container");
+        AllocTraits::destroy(alloc_, data_);
+        for (size_type i = 1; i < size_; ++i)
+        {
+            AllocTraits::construct(alloc_, data_ + i - 1, std::move(data_[i]));
+            AllocTraits::destroy(alloc_, data_ + i);
+        }
+        --size_;
+    }
+
+    // Доступ по индексу с проверкой
+    reference at(size_type index)
+    {
+        if (index >= size_)
+            throw std::out_of_range("at: index out of range");
+        return data_[index];
+    }
+
+    const_reference at(size_type index) const
+    {
+        if (index >= size_)
+            throw std::out_of_range("at: index out of range");
+        return data_[index];
+    }
+
+    // Доступ без проверки
+    reference operator[](size_type index) { return data_[index]; }
+    const_reference operator[](size_type index) const { return data_[index]; }
+
+    // Итераторы
+    iterator begin() { return data_; }
+    iterator end()   { return data_ + size_; }
+    const_iterator begin() const { return data_; }
+    const_iterator end()   const { return data_ + size_; }
+    const_iterator cbegin() const { return data_; }
+    const_iterator cend()   const { return data_ + size_; }
+
+    // Размер и ёмкость
+    size_type size() const noexcept { return size_; }
+    size_type capacity() const noexcept { return capacity_; }
+    bool empty() const noexcept { return size_ == 0; }
+
+    // Получить аллокатор
+    allocator_type get_allocator() const { return alloc_; }
+};
+
+#endif // CONSISTENT_CONTAINER_H
