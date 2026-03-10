@@ -31,7 +31,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: build/Release/laboratory4.exe 
+          path: build/Release/lab4.exe 
 
   build-linux:
     runs-on: ubuntu-latest
