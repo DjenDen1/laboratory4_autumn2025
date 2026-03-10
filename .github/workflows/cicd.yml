@@ -31,7 +31,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: build/Release/laboratory3.exe 
+          path: build/Release/laboratory4.exe 
 
   build-linux:
     runs-on: ubuntu-latest
@@ -57,7 +57,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: build/laboratory4
+          path: build/lab4
 
   create-release:
     needs: [build-windows, build-linux]
@@ -84,7 +84,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            windows-artifact/laboratory4.exe
-            linux-artifact/laboratory4
+            windows-artifact/lab4.exe
+            linux-artifact/lab4
           body: |
-            Laboratory 3 Release v${{ github.run_number }}
+            Laboratory 4 Release v${{ github.run_number }}
